@@ -1,0 +1,19 @@
+alias HTTP.Headers
+alias HTTP.Method
+alias HTTP.Request
+alias URI.Error as URIError
+
+priv fn request(method: Method, target: String) -> Request
+  Request{
+    body: "",
+    headers: Headers.new(),
+    method: method,
+    path: target,
+    version: "HTTP/1.1",
+  }
+end
+
+# A conn as a handler sees it, with the path and query decoded.
+priv fn decoded(method: Method, target: String) -> Conn ! URIError
+  try decode(Conn.from_request(request(method, target)))
+end

@@ -1,0 +1,12 @@
+alias HTTP.Method
+alias URI.Error as URIError
+
+test "each rejection maps to its status"
+  bad = Rejection.BadRequest(URIError.InvalidPercentEncoding("%zz"))
+  assert bad.status().code == 400
+
+  not_allowed = Rejection.MethodNotAllowed([Method.Get])
+  assert not_allowed.status().code == 405
+
+  assert Rejection.NotFound.status().code == 404
+end

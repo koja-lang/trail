@@ -1,0 +1,29 @@
+alias HTTP.Method
+alias HTTP.Status
+alias URI.Error as URIError
+
+@doc """
+Why `Router` answered a request itself instead of running a handler.
+`BadRequest` carries the decoding error from the path or query.
+`MethodNotAllowed` carries the methods that do have a route for the
+path, in the order the `Allow` header lists them.
+
+A `Router` renders every rejection through its `on_reject` hook, so
+one function decides the error shape for all three.
+"""
+enum Rejection
+  BadRequest(URIError)
+  MethodNotAllowed(List<Method>)
+  NotFound
+
+  @doc """
+  The status this rejection answers with.
+  """
+  fn status(self) -> Status
+    match self
+      Rejection.BadRequest(_) -> Status.bad_request()
+      Rejection.MethodNotAllowed(_) -> Status.method_not_allowed()
+      Rejection.NotFound -> Status.not_found()
+    end
+  end
+end

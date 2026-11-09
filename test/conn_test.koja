@@ -1,0 +1,75 @@
+alias HTTP.Method
+alias HTTP.Status
+alias JSON.Value
+alias Test.require
+
+test "path and query split at the question mark"
+  conn = Conn.from_request(request(Method.Get, "/items?limit=5&q=abc"))
+  assert conn.path == "/items"
+  assert conn.query == "limit=5&q=abc"
+
+  conn = Conn.from_request(request(Method.Get, "/items"))
+  assert conn.path == "/items"
+  assert conn.query == ""
+end
+
+test "query_param returns the first decoded value"
+  conn = try require(decoded(Method.Get, "/items?q=a+b%21&q=second&limit=5"))
+  assert conn.query_param("q") == Option.Some("a b!")
+  assert conn.query_param("limit") == Option.Some("5")
+  assert conn.query_param("absent") == Option.None
+end
+
+test "query_values returns every value in wire order"
+  conn = try require(decoded(Method.Get, "/items?tag=b&other=1&tag=a"))
+  assert conn.query_values("tag") == ["b", "a"]
+  assert conn.query_values("other") == ["1"]
+  assert conn.query_values("absent") == []
+end
+
+test "a key with no value reads as empty"
+  conn = try require(decoded(Method.Get, "/items?flag&empty=&x=1"))
+  assert conn.query_param("flag") == Option.Some("")
+  assert conn.query_param("empty") == Option.Some("")
+  assert conn.query_param("x") == Option.Some("1")
+end
+
+test "bracket keys are literal"
+  conn = try require(decoded(Method.Get, "/items?tag[]=a&tag[]=b"))
+  assert conn.query_values("tag[]") == ["a", "b"]
+  assert conn.query_param("tag") == Option.None
+end
+
+test "json sets body and content headers"
+  conn = Conn.from_request(request(Method.Get, "/data"))
+  response = conn.json(
+    Status.ok(),
+    Value.object([Value.entry("ok", Value.bool(true))]),
+  ).to_response()
+
+  assert response.status.code == 200
+  assert response.body == "{\"ok\":true}"
+  assert response.headers.get("Content-Type") == Option.Some("application/json")
+  assert response.headers.get("Content-Length") == Option.Some("11")
+end
+
+test "text sets body and content headers"
+  conn = Conn.from_request(request(Method.Get, "/"))
+  response = conn.text(Status.ok(), "hi").to_response()
+
+  assert response.status.code == 200
+  assert response.body == "hi"
+  assert response.headers.get("Content-Type") ==
+    Option.Some("text/plain; charset=utf-8")
+  assert response.headers.get("Content-Length") == Option.Some("2")
+end
+
+test "an unresponded conn becomes a 500 and keeps the request version"
+  req = request(Method.Get, "/")
+  req.version = "HTTP/1.0"
+  response = Conn.from_request(req).to_response()
+
+  assert response.status.code == 500
+  assert response.version == "HTTP/1.0"
+  assert response.headers.get("Content-Length") == Option.Some("0")
+end
