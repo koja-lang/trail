@@ -227,8 +227,16 @@ end
 # Every method a route table can hold, in `Allow` header order.
 priv fn all_methods -> List<Method>
   [
-    Method.Delete, Method.Get, Method.Head, Method.Options, Method.Patch,
-    Method.Post, Method.Put
+    Method.Connect,
+    Method.Delete,
+    Method.Get,
+    Method.Head,
+    Method.Options,
+    Method.Patch,
+    Method.Post,
+    Method.Put,
+    Method.Query,
+    Method.Trace
   ]
 end
 
@@ -269,5 +277,5 @@ end
 @doc false
 fn default_reject(conn: Conn, rejection: Rejection) -> Conn
   status = rejection.status()
-  conn.text(status, status.reason)
+  conn.text(status, status.reason())
 end

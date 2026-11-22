@@ -3,6 +3,7 @@ alias HTTP.Method
 alias HTTP.Request
 alias HTTP.Response
 alias HTTP.Status
+alias HTTP.Version
 
 @doc """
 One HTTP exchange as a value. A `Conn` starts as the parsed request
@@ -21,9 +22,13 @@ and stops `Router` from running anything after the current step.
 `path` and `query` hold the wire strings. `Router.dispatch` fills
 `path_segments` and `query_params` with their decoded forms before
 any middleware runs.
+
+`body` and `resp_body` hold bytes. Decode a text body with
+`conn.body.to_string()`. `resp_status` is `Option.None` until a
+handler sets a response.
 """
 struct Conn
-  body: String
+  body: Binary
   halted: Bool = false
   headers: Headers
   method: Method
@@ -32,26 +37,23 @@ struct Conn
   path_segments: List<String> = []
   query: String
   query_params: List<(String, String)> = []
-  resp_body: String = ""
+  resp_body: Binary = <<>>
   resp_headers: Headers
-  resp_status: Status
-  version: String
+  resp_status: Option<Status> = Option.None
+  version: Version
 
   @doc """
-  Builds a `Conn` from a parsed request. The request target splits
-  into path and query string at the first `?`.
+  Builds a `Conn` from a parsed request. `path` and `query` come from
+  `request.uri`. A request with no query has `""` as its `query`.
   """
   fn from_request(request: Request) -> Conn
-    parts = request.path.split("?")
-
     Conn{
       body: request.body,
       headers: request.headers,
       method: request.method,
-      path: parts.get(0).or(request.path),
-      query: parts.get(1).or(""),
+      path: request.uri.path,
+      query: request.uri.query.or(""),
       resp_headers: Headers.new(),
-      resp_status: Status.new(0, ""),
       version: request.version,
     }
   end
@@ -119,11 +121,17 @@ struct Conn
 
   # --- response writes ---
   @doc """
-  Sets the response status and body without touching headers.
+  Sets the response status and body without touching headers. A
+  `String` body is stored as its UTF-8 bytes.
   """
-  fn resp(self, status: Status, body: String) -> Conn
-    self.resp_body = body
-    self.resp_status = status
+  fn resp(self, status: Status, body: Binary | String) -> Conn
+    self.resp_body =
+      match body
+        bytes: Binary -> bytes
+        text: String -> text.to_binary()
+      end
+
+    self.resp_status = Option.Some(status)
     self
   end
 
@@ -160,24 +168,21 @@ struct Conn
 
   @doc """
   Converts the accumulated response into an `HTTP.Response`. A conn
-  that never set a status becomes a 500, since a handler forgot to
-  respond.
+  with no `resp_status` becomes a 500, since a handler forgot to
+  respond. Sets `Content-Length` from the byte size of the body when
+  the response headers have none.
   """
   fn to_response(self) -> Response
-    status = self.resp_status.code == 0
-      ? Status.internal_server_error()
-      : self.resp_status
-
     headers = self.resp_headers
 
     if headers.get("Content-Length").none?()
-      headers = headers.set("Content-Length", "#{self.resp_body.byte_length()}")
+      headers = headers.set("Content-Length", "#{self.resp_body.byte_size()}")
     end
 
     Response{
       body: self.resp_body,
       headers: headers,
-      status: status,
+      status: self.resp_status.or(Status.internal_server_error()),
       version: self.version,
     }
   end
@@ -185,10 +190,10 @@ struct Conn
   priv fn with_body(self, status: Status, body: String, content_type: String)
     -> Conn
 
-    self.resp_body = body
-    self.resp_status = status
+    self.resp_body = body.to_binary()
+    self.resp_status = Option.Some(status)
     self.resp_headers = self.resp_headers.set("Content-Type", content_type)
-      .set("Content-Length", "#{body.byte_length()}")
+      .set("Content-Length", "#{self.resp_body.byte_size()}")
     self
   end
 end

@@ -1,6 +1,6 @@
 alias HTTP.Method
 alias HTTP.Status
-alias JSON.Value
+alias URI.Error as URIError
 
 priv fn echo_param(name: String) -> fn (Conn) -> Conn
   handler =
@@ -28,7 +28,7 @@ test "routes by method and static path"
 
   response = router.dispatch(request(Method.Get, "/health"))
   assert response.status.code == 200, "GET matches"
-  assert response.body == "healthy", "GET body"
+  assert response.text() == Result.Ok("healthy"), "GET body"
 
   response = router.dispatch(request(Method.Post, "/health"))
   assert response.status.code == 201, "POST matches its own route"
@@ -47,10 +47,10 @@ test "binds and decodes path parameters"
       end)
 
   response = router.dispatch(request(Method.Get, "/sessions/abc-123"))
-  assert response.body == "abc-123", "single param binds"
+  assert response.text() == Result.Ok("abc-123"), "single param binds"
 
   response = router.dispatch(request(Method.Get, "/a/1/b/2"))
-  assert response.body == "1-2", "multiple params bind"
+  assert response.text() == Result.Ok("1-2"), "multiple params bind"
 
   response = router.dispatch(request(Method.Get, "/sessions/abc/extra"))
   assert response.status.code == 404, "extra segment is rejected"
@@ -59,13 +59,13 @@ test "binds and decodes path parameters"
   assert response.status.code == 404, "missing segment is rejected"
 
   response = router.dispatch(request(Method.Get, "/sessions/abc-123/"))
-  assert response.body == "abc-123", "trailing slash tolerated"
+  assert response.text() == Result.Ok("abc-123"), "trailing slash tolerated"
 
   response = router.dispatch(request(Method.Get, "/sessions/Foo%20Bar"))
-  assert response.body == "Foo Bar", "percent encoding decodes"
+  assert response.text() == Result.Ok("Foo Bar"), "percent encoding decodes"
 
   response = router.dispatch(request(Method.Get, "/sessions/a%2Fb"))
-  assert response.body == "a/b", "encoded slash stays inside its segment"
+  assert response.text() == Result.Ok("a/b"), "encoded slash stays inside its segment"
 end
 
 test "first matching route wins"
@@ -75,10 +75,10 @@ test "first matching route wins"
     .get("/things/:id", echo_param("id"))
 
   response = router.dispatch(request(Method.Get, "/things/special"))
-  assert response.body == "special", "static route registered first wins"
+  assert response.text() == Result.Ok("special"), "static route registered first wins"
 
   response = router.dispatch(request(Method.Get, "/things/42"))
-  assert response.body == "42", "param route still reachable"
+  assert response.text() == Result.Ok("42"), "param route still reachable"
 end
 
 test "middleware runs in order and halt stops the pipeline"
@@ -95,14 +95,14 @@ test "middleware runs in order and halt stops the pipeline"
 
   response = router.dispatch(request(Method.Get, "/secret"))
   assert response.status.code == 401, "halted by middleware"
-  assert response.body == "no credentials", "middleware response body"
+  assert response.text() == Result.Ok("no credentials"), "middleware response body"
   assert response.headers.get("X-First") == Option.Some("1"), "earlier middleware still applied"
 
   authed = request(Method.Get, "/secret")
   authed.headers = authed.headers.set("Authorization", "Bearer x")
   response = router.dispatch(authed)
   assert response.status.code == 200, "passes with credentials"
-  assert response.body == "the secret", "handler ran"
+  assert response.text() == Result.Ok("the secret"), "handler ran"
 end
 
 test "handlers read decoded query params"
@@ -113,10 +113,10 @@ test "handlers read decoded query params"
       end)
 
   response = router.dispatch(request(Method.Get, "/items?limit=5&q=a+b"))
-  assert response.body == "5/a b", "query params decode"
+  assert response.text() == Result.Ok("5/a b"), "query params decode"
 
   response = router.dispatch(request(Method.Get, "/items"))
-  assert response.body == "none/none", "absent query params"
+  assert response.text() == Result.Ok("none/none"), "absent query params"
 end
 
 test "default rejections answer in plain text"
@@ -124,17 +124,17 @@ test "default rejections answer in plain text"
 
   response = router.dispatch(request(Method.Get, "/nowhere"))
   assert response.status.code == 404, "no route"
-  assert response.body == "Not Found", "404 body"
+  assert response.text() == Result.Ok("Not Found"), "404 body"
   assert response.headers.get("Content-Type") ==
     Option.Some("text/plain; charset=utf-8"), "404 content type"
 
   response = router.dispatch(request(Method.Delete, "/health"))
   assert response.status.code == 405, "wrong method"
-  assert response.body == "Method Not Allowed", "405 body"
+  assert response.text() == Result.Ok("Method Not Allowed"), "405 body"
 
   response = router.dispatch(request(Method.Get, "/%zz"))
   assert response.status.code == 400, "bad percent encoding"
-  assert response.body == "Bad Request", "400 body"
+  assert response.text() == Result.Ok("Bad Request"), "400 body"
 end
 
 test "method not allowed lists the allowed methods"
@@ -153,6 +153,21 @@ test "method not allowed lists the allowed methods"
   assert response.headers.get("Allow") == Option.Some("GET"), "Allow is deduplicated across routes for the same path"
 end
 
+test "Allow names a method that has no verb function"
+  router =
+    Router{}
+    .route(Method.Trace, "/search", ok("traced"))
+    .route(Method.Query, "/search", ok("found"))
+    .get("/search", ok("listed"))
+
+  response = router.dispatch(request(Method.Post, "/search"))
+  assert response.status.code == 405, "status"
+  assert response.headers.get("Allow") == Option.Some("GET, QUERY, TRACE"), "Allow lists QUERY and TRACE"
+
+  response = router.dispatch(request(Method.Query, "/search"))
+  assert response.text() == Result.Ok("found"), "the QUERY route runs"
+end
+
 test "a custom reject handler sees the rejection and the conn"
   router =
     Router{}
@@ -165,23 +180,59 @@ test "a custom reject handler sees the rejection and the conn"
           Rejection.NotFound -> "no route for #{conn.path}"
         end
 
-      conn.json(rejection.status(), Value.string(body))
+      conn.json(rejection.status(), body)
     end)
     .get("/items", ok("listed"))
     .post("/items", ok("created"))
 
   response = router.dispatch(request(Method.Get, "/nowhere"))
   assert response.status.code == 404, "custom 404 status"
-  assert response.body == "\"no route for /nowhere\"", "custom 404 body"
+  assert response.text() == Result.Ok("\"no route for /nowhere\""), "custom 404 body"
   assert response.headers.get("X-Trace") == Option.Some("t1"), "middleware headers survive into a 404"
 
   response = router.dispatch(request(Method.Put, "/items"))
   assert response.status.code == 405, "custom 405 status"
-  assert response.body == "\"allowed: 2\"", "handler reads the method list"
+  assert response.text() == Result.Ok("\"allowed: 2\""), "handler reads the method list"
   assert response.headers.get("Allow") == Option.Some("GET, POST"), "Allow set before the handler runs"
 
   response = router.dispatch(request(Method.Get, "/items?q=%zz"))
   assert response.status.code == 400, "custom 400 status"
-  assert response.body == "\"bad: /items\"", "custom 400 body"
+  assert response.text() == Result.Ok("\"bad: /items\""), "custom 400 body"
   assert response.headers.get("X-Trace") == Option.None, "middleware does not run for a request that failed to decode"
+end
+
+test "a request body that is not UTF-8 reaches the handler"
+  router = Router{}.post(
+    "/upload",
+    fn (conn: Conn) -> Conn conn.resp(Status.ok(), conn.body) end,
+  )
+
+  upload = request(Method.Post, "/upload")
+  upload.body = <<255, 0, 254>>
+  response = router.dispatch(upload)
+
+  assert response.status.code == 200, "handler ran"
+  assert response.body == <<255, 0, 254>>, "the bytes did not change"
+end
+
+test "a path that decodes to bad UTF-8 is a bad request"
+  reject =
+    fn (conn: Conn, rejection: Rejection) -> Conn
+      body =
+        match rejection
+          Rejection.BadRequest(cause) ->
+            cause == URIError.InvalidUTF8 ? "bad UTF-8" : "other cause"
+
+          _ ->
+            "other rejection"
+        end
+
+      conn.text(rejection.status(), body)
+    end
+
+  router = Router{}.on_reject(reject).get("/sessions/:id", echo_param("id"))
+
+  response = router.dispatch(request(Method.Get, "/sessions/%ff"))
+  assert response.status.code == 400, "status"
+  assert response.text() == Result.Ok("bad UTF-8"), "the cause reaches the hook"
 end

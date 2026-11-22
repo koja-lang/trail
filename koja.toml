@@ -1,8 +1,8 @@
 [project]
 authors = ["Henry Popp <henry@hpopp.dev>"]
 description = "Composable HTTP routing for Koja"
-koja = "0.20.1"
+koja = "0.21"
 license = "MIT"
 name = "trail"
 namespace = "Trail"
-version = "0.1.0"
+version = "0.2.0"

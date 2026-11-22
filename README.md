@@ -26,7 +26,7 @@ Add the package to your `koja.toml`.
 
 ```toml
 [dependencies]
-trail = { github = "koja-lang/trail", tag = "v0.1.0" }
+trail = { github = "koja-lang/trail", tag = "v0.2.0" }
 ```
 
 ## Usage
@@ -56,7 +56,7 @@ fn require_auth(conn: Conn) -> Conn
 end
 
 fn reject(conn: Conn, rejection: Rejection) -> Conn
-  conn.text(rejection.status(), "rejected: #{rejection.status().reason}")
+  conn.text(rejection.status(), "rejected: #{rejection.status().reason()}")
 end
 
 fn build_router -> Router
@@ -85,13 +85,15 @@ end
 
 | Function                       | Effect                                    |
 | ------------------------------ | ----------------------------------------- |
-| `resp(status, body)`           | Set status and body, headers untouched.   |
+| `resp(status, body)`           | Bytes or text body, headers untouched.    |
 | `text(status, body)`           | Plain text body with content headers.     |
 | `json(status, value)`          | JSON body with content headers.           |
 | `put_resp_header(name, value)` | Set one response header.                  |
 | `halt()`                       | Stop the pipeline after the current step. |
 
-`to_response` converts the accumulated state into an `HTTP.Response` with the request's HTTP version. A conn that never set a status becomes a 500, because a handler forgot to respond.
+`conn.body` and `conn.resp_body` hold bytes. `resp` takes a `Binary` or a `String`, and a `String` is stored as its UTF-8 bytes. A handler that wants the request body as text calls `conn.body.to_string()`.
+
+`to_response` converts the accumulated state into an `HTTP.Response` with the request's HTTP version. `conn.resp_status` is `Option.None` until a handler responds, and a conn with no status becomes a 500, because a handler forgot to respond.
 
 ## Rejections
 
@@ -102,6 +104,8 @@ The router answers three kinds of request without running a handler. Each is a `
 | `BadRequest(URI.Error)`          | 400    | The path or query has malformed percent encoding or bad UTF-8 |
 | `MethodNotAllowed(List<Method>)` | 405    | Routes exist for the path, but none for the method            |
 | `NotFound`                       | 404    | No route matches the path                                     |
+
+A server can reject a malformed request target before the router sees it. The router then gets `BadRequest` mostly for percent text that is not valid UTF-8.
 
 The default rendering is the status reason as plain text. `on_reject` replaces it with one function for all three, so an API can render every error in its own JSON shape. For `MethodNotAllowed` the router sets the `Allow` header before calling the hook, and the variant carries the same methods for use in a body.
 
@@ -119,7 +123,7 @@ The default rendering is the status reason as plain text. `on_reject` replaces i
 
 - Route groups and mounted sub-routers.
 - `HEAD` falling through to `GET` routes.
-- Request body streaming. `Conn.body` is the fully buffered body.
+- Request body streaming. `Conn.body` is the fully buffered body, as bytes.
 - The `tag[]` and `user[name]` query conventions. The flat pair list is the substrate for a later form decoder.
 
 ## Development

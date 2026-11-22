@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-22
+
+Requires Koja 0.21.0.
+
+### Changed
+
+- **Breaking change.** `Conn.body` and `Conn.resp_body` are `Binary`. A handler that wants the request body as text calls `conn.body.to_string()`. A test that compares a response body uses `response.text()`.
+- **Breaking change.** `Conn.resp_status` is an `Option<Status>`. It is `Option.None` until a handler sets a response. Before, it was a status with the code 0.
+- **Breaking change.** `Conn.version` is an `HTTP.Version`.
+- `Conn.resp` takes a `Binary` or a `String` body, and stores a `String` as its UTF-8 bytes.
+- `Conn.from_request` takes `path` and `query` from `request.uri`.
+- The `Allow` header of a 405 response can name `CONNECT`, `QUERY`, and `TRACE`.
+
 ## [0.1.0] - 2026-11-09
 
 Requires Koja 0.20.1.

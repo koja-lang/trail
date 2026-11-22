@@ -4,7 +4,9 @@ alias URI.Error as URIError
 
 @doc """
 Why `Router` answered a request itself instead of running a handler.
-`BadRequest` carries the decoding error from the path or query.
+`BadRequest` carries the decoding error from the path or query. A
+server can reject a malformed request target before the router sees
+it, so the router mostly gets percent text that is not valid UTF-8.
 `MethodNotAllowed` carries the methods that do have a route for the
 path, in the order the `Allow` header lists them.
 

@@ -3,13 +3,30 @@ alias HTTP.Method
 alias HTTP.Request
 alias URI.Error as URIError
 
+# Builds a request for `target`, a path with an optional query. The
+# target splits at the first `?` and is not checked, so a test can
+# give a target that a parser rejects.
 priv fn request(method: Method, target: String) -> Request
+  parts = target.split("?")
+  query: Option<String> = Option.None
+
+  if parts.length() > 1
+    query = Option.Some(String.join(parts.slice(1, parts.length() - 1), "?"))
+  end
+
   Request{
-    body: "",
+    body: <<>>,
     headers: Headers.new(),
     method: method,
-    path: target,
-    version: "HTTP/1.1",
+    uri: URI{
+      fragment: Option.None,
+      host: Option.None,
+      path: parts.get(0).or(""),
+      port: Option.None,
+      query: query,
+      scheme: Option.None,
+      userinfo: Option.None,
+    },
   }
 end
 
